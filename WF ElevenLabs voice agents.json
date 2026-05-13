@@ -1,0 +1,1397 @@
+{
+  "name": "WF ElevenLabs voice agents",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map((item) => {\n  const update = item.json;\n\n  const message = update.message || null;\n  const callbackQuery = update.callback_query || null;\n\n  const from = message?.from || callbackQuery?.from || {};\n  const chat = message?.chat || callbackQuery?.message?.chat || {};\n\n  const text = message?.text || '';\n  const callbackData = callbackQuery?.data || '';\n\n  let updateType = 'unknown';\n\n  if (message) {\n    updateType = 'message';\n  }\n\n  if (callbackQuery) {\n    updateType = 'callback_query';\n  }\n\n  return {\n    json: {\n      update_id: update.update_id || null,\n\n      update_type: updateType,\n\n      telegram_user_id: from.id || null,\n      username: from.username || null,\n      first_name: from.first_name || null,\n      last_name: from.last_name || null,\n\n      chat_id: chat.id || null,\n      message_id: message?.message_id || callbackQuery?.message?.message_id || null,\n\n      text,\n      callback_data: callbackData,\n\n      is_start_command: text === '/start'\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -64
+      ],
+      "id": "7362a15b-4eb9-4540-ac8e-cb6617edcaec",
+      "name": "Normalize Telegram Update"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  telegram_user_id,\n  username,\n  first_name,\n  last_name\nFROM telegram_users\nWHERE telegram_user_id = {{ $('Normalize Telegram Update').item.json.telegram_user_id }}\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        48,
+        -64
+      ],
+      "id": "66cfbda5-6706-49a5-a3a0-58018cb36312",
+      "name": "Get Telegram User",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO telegram_users (\n  telegram_user_id,\n  username,\n  first_name,\n  last_name\n)\nVALUES (\n  {{ $json.telegram_user_id }},\n  {{ $json.username ? JSON.stringify($json.username) : 'NULL' }},\n  {{ $json.first_name ? JSON.stringify($json.first_name) : 'NULL' }},\n  {{ $json.last_name ? JSON.stringify($json.last_name) : 'NULL' }}\n)\nON DUPLICATE KEY UPDATE\n  username = VALUES(username),\n  first_name = VALUES(first_name),\n  last_name = VALUES(last_name),\n  updated_at = CURRENT_TIMESTAMP;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        -160,
+        -64
+      ],
+      "id": "4d2ec39d-85b5-417a-895a-b3acf8b3b1d7",
+      "name": "Upsert Telegram User",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO bot_sessions (\n  user_id,\n  state\n)\nVALUES (\n  {{ $json.id }},\n  'idle'\n)\nON DUPLICATE KEY UPDATE\n  updated_at = CURRENT_TIMESTAMP;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        -64
+      ],
+      "id": "cc503b5d-03b9-490f-bf00-cb92dd6fc44a",
+      "name": "Create Bot Session If Not Exists",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  user_id,\n  selected_voice_agent_id,\n  state\nFROM bot_sessions\nWHERE user_id = {{ $('Get Telegram User').item.json.id }}\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        448,
+        -64
+      ],
+      "id": "ed6102c3-8bde-42da-86d2-d8284b9990ab",
+      "name": "Get Bot Session",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  COALESCE(\n    (\n      SELECT JSON_ARRAYAGG(\n        JSON_OBJECT(\n          'id', va.id,\n          'agent_name', va.agent_name,\n          'elevenlabs_agent_id', va.elevenlabs_agent_id\n        )\n      )\n      FROM voice_agents va\n      WHERE va.user_id = tu.id\n        AND va.is_active = TRUE\n    ),\n    JSON_ARRAY()\n  ) AS agents_json\nFROM telegram_users tu\nWHERE tu.id = {{ $('Get Telegram User').item.json.id }}\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1104,
+        960
+      ],
+      "id": "c99bcfcb-d877-4169-96de-81c2cfe49a44",
+      "name": "Get User Voice Agents",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nlet agents = item.agents_json || [];\n\nif (typeof agents === 'string') {\n  try {\n    agents = JSON.parse(agents);\n  } catch (error) {\n    agents = [];\n  }\n}\n\nif (!Array.isArray(agents)) {\n  agents = [];\n}\n\nconst chatId = $('Normalize Telegram Update').item.json.chat_id;\n\nlet text = '';\nlet replyMarkup = null;\n\nif (agents.length === 0) {\n  text = [\n    'Hello. Your Telegram account has been registered.',\n    '',\n    'No ElevenLabs voice agents are connected to your account yet.'\n  ].join('\\n');\n} else {\n  text = [\n    'Hello. Your Telegram account has been registered.',\n    '',\n    'Please select an ElevenLabs voice agent to manage:'\n  ].join('\\n');\n\n  replyMarkup = {\n    inline_keyboard: agents.map((agent) => [\n      {\n        text: agent.agent_name,\n        callback_data: `select_agent:${agent.id}`\n      }\n    ])\n  };\n}\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      agents,\n      has_agents: agents.length > 0,\n      text,\n      reply_markup: replyMarkup\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        960
+      ],
+      "id": "9b4fb9ea-dce4-4261-91fc-3e24300fd883",
+      "name": "Prepare Agents Menu"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env[\"TELEGRAM_BOT_TOKEN\"] + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    chat_id: $json.chat_id,\n    text: $json.text,\n    ...($json.reply_markup ? { reply_markup: $json.reply_markup } : {})\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1568,
+        960
+      ],
+      "id": "01e117ce-03b0-484e-bd6d-962c05cbe517",
+      "name": "HTTP Send Agents Menu"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dc36aa56-86d2-445b-a5a0-0e1e65b44acb",
+              "leftValue": "={{ $('Normalize Telegram Update').item.json.callback_data.startsWith('select_agent:') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        624,
+        -64
+      ],
+      "id": "9126c2c4-b319-4bb4-a616-473e77a56c43",
+      "name": "Is Select Agent Callback"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  va.id,\n  va.user_id,\n  va.elevenlabs_agent_id,\n  va.agent_name\nFROM voice_agents va\nJOIN telegram_users tu ON tu.id = va.user_id\nWHERE tu.telegram_user_id = {{ $('Normalize Telegram Update').item.json.telegram_user_id }}\n  AND va.id = {{ Number($('Normalize Telegram Update').item.json.callback_data.split(':')[1]) }}\n  AND va.is_active = TRUE\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        928,
+        -80
+      ],
+      "id": "7ef7fbc5-9955-4cff-a94b-4f0be4b96e6b",
+      "name": "Get Selected Agent",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  selected_voice_agent_id = {{ $json.id }},\n  state = 'idle',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $json.user_id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1136,
+        -80
+      ],
+      "id": "d46b3360-45ef-42df-aa0f-f21a13d17cee",
+      "name": "Save Selected Agent",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const selectedAgent = $('Get Selected Agent').item.json;\nconst chatId = $('Normalize Telegram Update').item.json.chat_id;\n\nconst text = [\n  `Selected agent: ${selectedAgent.agent_name}`,\n  '',\n  'What do you want to update?'\n].join('\\n');\n\nconst replyMarkup = {\n  inline_keyboard: [\n    [\n      {\n        text: 'Update Prompt',\n        callback_data: 'edit_prompt'\n      }\n    ],\n    [\n      {\n        text: 'Update Welcome Message',\n        callback_data: 'edit_welcome'\n      }\n    ],\n    [\n      {\n        text: 'Update Knowledge Base',\n        callback_data: 'edit_knowledge_base'\n      }\n    ],\n    [\n      {\n        text: 'Back to Agents',\n        callback_data: 'back_to_agents'\n      }\n    ]\n  ]\n};\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      selected_agent_id: selectedAgent.id,\n      selected_agent_name: selectedAgent.agent_name,\n      text,\n      reply_markup: replyMarkup\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -80
+      ],
+      "id": "dd05f43d-b8be-4ee4-a60b-e3aab1fa38c8",
+      "name": "Prepare Agent Actions Menu"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env[\"TELEGRAM_BOT_TOKEN\"] + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    chat_id: $json.chat_id,\n    text: $json.text,\n    ...($json.reply_markup ? { reply_markup: $json.reply_markup } : {})\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2144,
+        96
+      ],
+      "id": "ce811b89-a7ae-4cd9-96d6-d696e8825640",
+      "name": "HTTP Send Telegram Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ef99277d-b6ff-479b-80f4-54f11c5dfb07",
+              "leftValue": "={{ $('Normalize Telegram Update').item.json.callback_data === 'edit_prompt' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        816,
+        112
+      ],
+      "id": "6fa1d41e-adf3-4dc4-8de3-14060e2a9be7",
+      "name": "Is Edit Prompt Callback"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  state = 'waiting_prompt',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $('Get Telegram User').item.json.id }}\n  AND selected_voice_agent_id IS NOT NULL;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1056,
+        96
+      ],
+      "id": "a53803e7-4a3f-4830-b2e1-8d05694147a6",
+      "name": "Set State Waiting Prompt",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatId = $('Normalize Telegram Update').item.json.chat_id;\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      text: [\n        'Please send the new prompt for the selected ElevenLabs voice agent.',\n        '',\n        'Send /cancel to cancel this action.'\n      ].join('\\n'),\n      reply_markup: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        96
+      ],
+      "id": "dc474a65-9378-4075-b6e1-8e9f88ebae26",
+      "name": "Prepare Ask Prompt Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cfd666dc-4c05-463b-9b36-7c83494f775f",
+              "leftValue": "={{ \n  $('Normalize Telegram Update').item.json.update_type === 'message' &&\n  $('Get Bot Session').item.json.state === 'waiting_prompt' &&\n  $('Normalize Telegram Update').item.json.text &&\n  !$('Normalize Telegram Update').item.json.text.startsWith('/')\n}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        16,
+        544
+      ],
+      "id": "474d3f15-ce7a-4ccd-bf71-1661c5c549f1",
+      "name": "Is Waiting Prompt Message"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  va.id,\n  va.user_id,\n  va.elevenlabs_agent_id,\n  va.agent_name,\n  {{ JSON.stringify($('Normalize Telegram Update').item.json.text) }} AS new_prompt\nFROM voice_agents va\nJOIN bot_sessions bs ON bs.selected_voice_agent_id = va.id\nJOIN telegram_users tu ON tu.id = bs.user_id\nWHERE tu.telegram_user_id = {{ $('Normalize Telegram Update').item.json.telegram_user_id }}\n  AND bs.user_id = {{ $('Get Telegram User').item.json.id }}\n  AND bs.state = 'waiting_prompt'\n  AND va.is_active = TRUE\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1104,
+        352
+      ],
+      "id": "1e568952-98a9-4bc8-aac7-43299ec0aa15",
+      "name": "Get Agent For Prompt Update",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.elevenlabs.io/v1/convai/agents/' + $json.elevenlabs_agent_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "={{ $env[\"ELEVENLABS_API_KEY\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    conversation_config: {\n      agent: {\n        prompt: {\n          prompt: $json.new_prompt\n        }\n      }\n    }\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1296,
+        352
+      ],
+      "id": "389b3716-481c-49de-89ff-92e0ed11ddfd",
+      "name": "HTTP Update ElevenLabs Prompt"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        -64
+      ],
+      "id": "b7542c7e-d26d-476b-949d-c39ac18cf0e4",
+      "name": "Telegram Trigger",
+      "webhookId": "beac61f9-b6a2-43b5-b653-f584e0b79309",
+      "credentials": {
+        "telegramApi": {
+          "id": "LlGq7elMaMQhNitB",
+          "name": "elevenlabs TZ"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  state = 'idle',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $('Get Agent For Prompt Update').item.json.user_id }}\n  AND selected_voice_agent_id = {{ $('Get Agent For Prompt Update').item.json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1488,
+        352
+      ],
+      "id": "9258c697-3378-44eb-a61e-a076ad516614",
+      "name": "Reset State After Prompt Update",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatId = $('Normalize Telegram Update').item.json.chat_id;\nconst agentName = $('Get Agent For Prompt Update').item.json.agent_name;\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      text: [\n        `Prompt updated successfully for ${agentName}.`,\n        '',\n        'You can send /start to manage agents again.'\n      ].join('\\n'),\n      reply_markup: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        352
+      ],
+      "id": "ca07501c-f377-4a35-9b0a-fb7f499fbbdc",
+      "name": "Prepare Prompt Updated Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29839727-4af5-441e-b280-3e7640f8392b",
+              "leftValue": "={{ $('Normalize Telegram Update').item.json.callback_data === 'edit_welcome' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -576,
+        128
+      ],
+      "id": "6304907b-f049-41b0-be7d-087289b82f32",
+      "name": "Is Edit Welcome Callback"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  state = 'waiting_welcome_message',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $('Get Telegram User').item.json.id }}\n  AND selected_voice_agent_id IS NOT NULL;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        -208,
+        112
+      ],
+      "id": "75bc9c7c-515c-4653-b7cb-ae3cf4e37b0b",
+      "name": "Set State Waiting Welcome",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatId = $('Normalize Telegram Update').item.json.chat_id;\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      text: [\n        'Please send the new welcome message for the selected ElevenLabs voice agent.',\n        '',\n        'Send /cancel to cancel this action.'\n      ].join('\\n'),\n      reply_markup: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        112
+      ],
+      "id": "b823cb8e-8391-4c8f-ac1a-b7b246972d81",
+      "name": "Prepare Ask Welcome Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa95937a-222e-452f-ab32-ae8cda94b0b5",
+              "leftValue": "={{ \n  $('Normalize Telegram Update').item.json.update_type === 'message' &&\n  $('Get Bot Session').item.json.state === 'waiting_welcome_message' &&\n  $('Normalize Telegram Update').item.json.text &&\n  !$('Normalize Telegram Update').item.json.text.startsWith('/')\n}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        272,
+        640
+      ],
+      "id": "d473f8a3-54e9-4254-8136-4aa04044cbe7",
+      "name": "Is Waiting Welcome Message"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  va.id,\n  va.user_id,\n  va.elevenlabs_agent_id,\n  va.agent_name,\n  {{ JSON.stringify($('Normalize Telegram Update').item.json.text) }} AS new_welcome_message\nFROM voice_agents va\nJOIN bot_sessions bs ON bs.selected_voice_agent_id = va.id\nJOIN telegram_users tu ON tu.id = bs.user_id\nWHERE tu.telegram_user_id = {{ $('Normalize Telegram Update').item.json.telegram_user_id }}\n  AND bs.user_id = {{ $('Get Telegram User').item.json.id }}\n  AND bs.state = 'waiting_welcome_message'\n  AND va.is_active = TRUE\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        912,
+        560
+      ],
+      "id": "14176a21-cfd1-49fb-b7d6-52cec633d78e",
+      "name": "Get Agent For Welcome Update",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.elevenlabs.io/v1/convai/agents/' + $json.elevenlabs_agent_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "={{ $env[\"ELEVENLABS_API_KEY\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    conversation_config: {\n      agent: {\n        first_message: $json.new_welcome_message\n      }\n    }\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1152,
+        560
+      ],
+      "id": "6a402a12-69dd-4d64-a535-a0accb96bcc3",
+      "name": "HTTP Update ElevenLabs Welcome Message"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  state = 'idle',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $('Get Agent For Welcome Update').item.json.user_id }}\n  AND selected_voice_agent_id = {{ $('Get Agent For Welcome Update').item.json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1408,
+        560
+      ],
+      "id": "e69b78e1-87cd-40c0-a6dd-8c34c3b65fd5",
+      "name": "Reset State After Welcome Update",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatId = $('Normalize Telegram Update').item.json.chat_id;\nconst agentName = $('Get Agent For Welcome Update').item.json.agent_name;\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      text: [\n        `Welcome message updated successfully for ${agentName}.`,\n        '',\n        'You can send /start to manage agents again.'\n      ].join('\\n'),\n      reply_markup: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        560
+      ],
+      "id": "58fdaa5c-870f-4e3a-a0e6-3aff50b1f17b",
+      "name": "Prepare Welcome Updated Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "64b80a0f-bf99-4fc3-a8df-cc04f67afba4",
+              "leftValue": "={{ $('Normalize Telegram Update').item.json.callback_data === 'edit_knowledge_base' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -272,
+        352
+      ],
+      "id": "1d9936d6-b400-42c8-ac7a-8d24f7a1c685",
+      "name": "Is Edit Knowledge Base Callback"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  state = 'waiting_knowledge_base',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $('Get Telegram User').item.json.id }}\n  AND selected_voice_agent_id IS NOT NULL;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        80,
+        336
+      ],
+      "id": "a2dd384a-d5e7-4406-8415-148eb335cc33",
+      "name": "Set State Waiting Knowledge Base",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatId = $('Normalize Telegram Update').item.json.chat_id;\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      text: [\n        'Please send the new knowledge base content for the selected ElevenLabs voice agent.',\n        '',\n        'Send plain text. For this MVP, the text will be saved as a new Knowledge Base text document.',\n        '',\n        'Send /cancel to cancel this action.'\n      ].join('\\n'),\n      reply_markup: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        336
+      ],
+      "id": "13848e7f-30ae-4e23-811e-f76b7cee5450",
+      "name": "Prepare Ask Knowledge Base Message"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "85fbc210-460a-432c-ab59-24334193dddf",
+              "leftValue": "={{ \n  $('Normalize Telegram Update').item.json.update_type === 'message' &&\n  $('Get Bot Session').item.json.state === 'waiting_knowledge_base' &&\n  $('Normalize Telegram Update').item.json.text &&\n  !$('Normalize Telegram Update').item.json.text.startsWith('/')\n}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        528,
+        752
+      ],
+      "id": "0ed66843-7a1b-4532-9d55-bad5c67ed891",
+      "name": "Is Waiting Knowledge Base Message"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  va.id,\n  va.user_id,\n  va.elevenlabs_agent_id,\n  va.agent_name,\n  {{ JSON.stringify($('Normalize Telegram Update').item.json.text) }} AS new_knowledge_base\nFROM voice_agents va\nJOIN bot_sessions bs ON bs.selected_voice_agent_id = va.id\nJOIN telegram_users tu ON tu.id = bs.user_id\nWHERE tu.telegram_user_id = {{ $('Normalize Telegram Update').item.json.telegram_user_id }}\n  AND bs.user_id = {{ $('Get Telegram User').item.json.id }}\n  AND bs.state = 'waiting_knowledge_base'\n  AND va.is_active = TRUE\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        736
+      ],
+      "id": "6ce29ed4-4452-4907-872d-0c33f682ad0a",
+      "name": "Get Agent For Knowledge Base Update",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/convai/knowledge-base/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "={{ $env[\"ELEVENLABS_API_KEY\"] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    text: $json.new_knowledge_base,\n    name: 'tg_' \n      + $('Normalize Telegram Update').item.json.telegram_user_id \n      + '_agent_' \n      + $json.id \n      + '_kb_' \n      + Date.now()\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1072,
+        736
+      ],
+      "id": "c58c1340-1d1b-4c73-851d-6eaa60e33ddd",
+      "name": "HTTP Create ElevenLabs KB Text Document"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_base_documents (\n  voice_agent_id,\n  elevenlabs_document_id,\n  document_name,\n  source_type\n)\nVALUES (\n  {{ $('Get Agent For Knowledge Base Update').item.json.id }},\n  {{ JSON.stringify($('HTTP Create ElevenLabs KB Text Document').item.json.id) }},\n  {{ JSON.stringify($('HTTP Create ElevenLabs KB Text Document').item.json.name || 'knowledge_base_text') }},\n  'text'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1264,
+        736
+      ],
+      "id": "128bfbb9-9174-4ae8-b710-a5981b3bbb9c",
+      "name": "Save Knowledge Base Document To DB",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \n  'https://api.elevenlabs.io/v1/convai/agents/' \n  + $('Get Agent For Knowledge Base Update').item.json.elevenlabs_agent_id \n}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "={{ $env[\"ELEVENLABS_API_KEY\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    conversation_config: {\n      agent: {\n        prompt: {\n          knowledge_base: [\n            {\n              id: $('HTTP Create ElevenLabs KB Text Document').item.json.id,\n              name: $('HTTP Create ElevenLabs KB Text Document').item.json.name || 'knowledge_base_text',\n              type: 'text',\n              usage_mode: 'auto'\n            }\n          ]\n        }\n      }\n    }\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1456,
+        736
+      ],
+      "id": "ceefbce5-d7c5-45cf-ac4d-193261593ec2",
+      "name": "HTTP Update ElevenLabs Agent Knowledge Base"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bot_sessions\nSET\n  state = 'idle',\n  updated_at = CURRENT_TIMESTAMP\nWHERE user_id = {{ $('Get Agent For Knowledge Base Update').item.json.user_id }}\n  AND selected_voice_agent_id = {{ $('Get Agent For Knowledge Base Update').item.json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1648,
+        736
+      ],
+      "id": "152f4d5c-32d1-4317-adb6-236f7091e82b",
+      "name": "Reset State After Knowledge Base Update",
+      "credentials": {
+        "mySql": {
+          "id": "LmZnIU3WGPkcFt2W",
+          "name": "MySQL ElevenLabs voice"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatId = $('Normalize Telegram Update').item.json.chat_id;\nconst agentName = $('Get Agent For Knowledge Base Update').item.json.agent_name;\nconst documentId = $('HTTP Create ElevenLabs KB Text Document').item.json.id;\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      text: [\n        `Knowledge base updated successfully for ${agentName}.`,\n        '',\n        `Document ID: ${documentId}`,\n        '',\n        'You can send /start to manage agents again.'\n      ].join('\\n'),\n      reply_markup: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        736
+      ],
+      "id": "ed7415ef-f6c9-4441-8764-ed3dd4b280ed",
+      "name": "Prepare Knowledge Base Updated Message"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env[\"TELEGRAM_BOT_TOKEN\"] + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    chat_id: $json.chat_id,\n    text: $json.text,\n    ...($json.reply_markup ? { reply_markup: $json.reply_markup } : {})\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        272,
+        112
+      ],
+      "id": "0e52d955-693b-47b3-b0a4-496af73cc194",
+      "name": "HTTP Send Telegram Message copy"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Normalize Telegram Update": {
+      "main": [
+        [
+          {
+            "node": "Upsert Telegram User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Telegram User": {
+      "main": [
+        [
+          {
+            "node": "Get Telegram User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Telegram User": {
+      "main": [
+        [
+          {
+            "node": "Create Bot Session If Not Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Bot Session If Not Exists": {
+      "main": [
+        [
+          {
+            "node": "Get Bot Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bot Session": {
+      "main": [
+        [
+          {
+            "node": "Is Select Agent Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Voice Agents": {
+      "main": [
+        [
+          {
+            "node": "Prepare Agents Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Agents Menu": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Agents Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Select Agent Callback": {
+      "main": [
+        [
+          {
+            "node": "Get Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Edit Prompt Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Selected Agent": {
+      "main": [
+        [
+          {
+            "node": "Save Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Selected Agent": {
+      "main": [
+        [
+          {
+            "node": "Prepare Agent Actions Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Agent Actions Menu": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Edit Prompt Callback": {
+      "main": [
+        [
+          {
+            "node": "Set State Waiting Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Edit Welcome Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set State Waiting Prompt": {
+      "main": [
+        [
+          {
+            "node": "Prepare Ask Prompt Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Ask Prompt Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Waiting Prompt Message": {
+      "main": [
+        [
+          {
+            "node": "Get Agent For Prompt Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Waiting Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Agent For Prompt Update": {
+      "main": [
+        [
+          {
+            "node": "HTTP Update ElevenLabs Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Telegram Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Update ElevenLabs Prompt": {
+      "main": [
+        [
+          {
+            "node": "Reset State After Prompt Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset State After Prompt Update": {
+      "main": [
+        [
+          {
+            "node": "Prepare Prompt Updated Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Prompt Updated Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Edit Welcome Callback": {
+      "main": [
+        [
+          {
+            "node": "Set State Waiting Welcome",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Edit Knowledge Base Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set State Waiting Welcome": {
+      "main": [
+        [
+          {
+            "node": "Prepare Ask Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Waiting Welcome Message": {
+      "main": [
+        [
+          {
+            "node": "Get Agent For Welcome Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Waiting Knowledge Base Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Agent For Welcome Update": {
+      "main": [
+        [
+          {
+            "node": "HTTP Update ElevenLabs Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Update ElevenLabs Welcome Message": {
+      "main": [
+        [
+          {
+            "node": "Reset State After Welcome Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset State After Welcome Update": {
+      "main": [
+        [
+          {
+            "node": "Prepare Welcome Updated Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Edit Knowledge Base Callback": {
+      "main": [
+        [
+          {
+            "node": "Set State Waiting Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Waiting Prompt Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set State Waiting Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Prepare Ask Knowledge Base Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Ask Knowledge Base Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Waiting Knowledge Base Message": {
+      "main": [
+        [
+          {
+            "node": "Get Agent For Knowledge Base Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get User Voice Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Agent For Knowledge Base Update": {
+      "main": [
+        [
+          {
+            "node": "HTTP Create ElevenLabs KB Text Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Create ElevenLabs KB Text Document": {
+      "main": [
+        [
+          {
+            "node": "Save Knowledge Base Document To DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Knowledge Base Document To DB": {
+      "main": [
+        [
+          {
+            "node": "HTTP Update ElevenLabs Agent Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Update ElevenLabs Agent Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Reset State After Knowledge Base Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset State After Knowledge Base Update": {
+      "main": [
+        [
+          {
+            "node": "Prepare Knowledge Base Updated Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Knowledge Base Updated Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Ask Welcome Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Welcome Updated Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7581e2ec-9e38-4930-8fa4-498dbf460d05",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "59061f61f0b92cde0d01669f6371c9e5287ed01f11e3829c58c3870b61d8d216"
+  },
+  "id": "K650N87Pf7qxIQyx",
+  "tags": []
+}
