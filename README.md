@@ -258,7 +258,7 @@ Send /cancel to cancel this action.
 
 ---
 
-## 8. Что реализованно
+## 8. Что реализовано
 
 1. exported n8n workflow JSON;
 2. MySQL schema;
